@@ -1,0 +1,174 @@
+<Window x:Class="ScreenshotTextEditor.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Screenshot Text Editor"
+        Height="900" Width="1400"
+        MinHeight="600" MinWidth="1000"
+        Background="{StaticResource BgDark}"
+        WindowStartupLocation="CenterScreen"
+        AllowDrop="True"
+        Drop="Window_Drop"
+        DragOver="Window_DragOver"
+        KeyDown="Window_KeyDown">
+
+    <Window.InputBindings>
+        <KeyBinding Key="O" Modifiers="Control" Command="{Binding OpenCommand}"/>
+        <KeyBinding Key="S" Modifiers="Control" Command="{Binding SaveCommand}"/>
+        <KeyBinding Key="P" Modifiers="Control" Command="{Binding PrintCommand}"/>
+        <KeyBinding Key="Z" Modifiers="Control" Command="{Binding UndoCommand}"/>
+        <KeyBinding Key="Y" Modifiers="Control" Command="{Binding RedoCommand}"/>
+        <KeyBinding Key="V" Modifiers="Control" Command="{Binding PasteCommand}"/>
+    </Window.InputBindings>
+
+    <DockPanel>
+        <!-- Menu -->
+        <Menu DockPanel.Dock="Top" Background="{StaticResource BgPanel}" Foreground="{StaticResource TextPrimary}">
+            <MenuItem Header="_File">
+                <MenuItem Header="_Open..." Click="Open_Click" InputGestureText="Ctrl+O"/>
+                <MenuItem Header="_Save Project" Click="SaveProject_Click" InputGestureText="Ctrl+S"/>
+                <MenuItem Header="Save Project _As..." Click="SaveProjectAs_Click"/>
+                <Separator/>
+                <MenuItem Header="Export _Image..." Click="Export_Click"/>
+                <MenuItem Header="_Print..." Click="Print_Click" InputGestureText="Ctrl+P"/>
+                <Separator/>
+                <MenuItem Header="E_xit" Click="Exit_Click"/>
+            </MenuItem>
+            <MenuItem Header="_Edit">
+                <MenuItem Header="_Undo" Click="Undo_Click" InputGestureText="Ctrl+Z"/>
+                <MenuItem Header="_Redo" Click="Redo_Click" InputGestureText="Ctrl+Y"/>
+                <Separator/>
+                <MenuItem Header="_Paste Image" Click="Paste_Click" InputGestureText="Ctrl+V"/>
+            </MenuItem>
+            <MenuItem Header="_View">
+                <MenuItem Header="Fit to Screen" Click="FitToScreen_Click"/>
+                <MenuItem Header="100%" Click="Zoom100_Click"/>
+                <MenuItem Header="200%" Click="Zoom200_Click"/>
+                <Separator/>
+                <MenuItem Header="Show Detection Boxes" IsCheckable="True" IsChecked="True" Click="ToggleBoxes_Click" Name="MenuShowBoxes"/>
+                <MenuItem Header="Original | Edited" IsCheckable="True" Click="ToggleCompare_Click" Name="MenuCompare"/>
+            </MenuItem>
+            <MenuItem Header="_Image">
+                <MenuItem Header="Rescan Image" Click="Rescan_Click"/>
+                <MenuItem Header="Rescan Selected Area" Click="RescanArea_Click"/>
+            </MenuItem>
+            <MenuItem Header="_Help">
+                <MenuItem Header="About" Click="About_Click"/>
+                <MenuItem Header="Privacy" Click="Privacy_Click"/>
+            </MenuItem>
+        </Menu>
+
+        <!-- Status bar -->
+        <StatusBar DockPanel.Dock="Bottom" Background="{StaticResource BgPanel}" Foreground="{StaticResource TextSecondary}">
+            <StatusBarItem>
+                <TextBlock Name="StatusText" Text="Ready • Offline mode • Drop an image or Ctrl+V to paste"/>
+            </StatusBarItem>
+            <StatusBarItem HorizontalAlignment="Right">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Name="ZoomText" Text="100%" Margin="0,0,16,0"/>
+                    <TextBlock Name="ResolutionText" Text=""/>
+                    <TextBlock Name="RegionCountText" Margin="16,0,0,0" Text=""/>
+                </StackPanel>
+            </StatusBarItem>
+        </StatusBar>
+
+        <!-- Main content -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="200"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="240"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Left Tools -->
+            <Border Grid.Column="0" Background="{StaticResource BgPanel}" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="0,0,1,0">
+                <StackPanel Margin="12">
+                    <TextBlock Text="TOOLS" FontWeight="SemiBold" Foreground="{StaticResource TextSecondary}" Margin="0,0,0,12"/>
+                    <Button Content="Open Image" Style="{StaticResource GlassButton}" Margin="0,0,0,8" Click="Open_Click"/>
+                    <Button Content="Paste (Ctrl+V)" Style="{StaticResource GlassButton}" Margin="0,0,0,8" Click="Paste_Click"/>
+                    <Button Content="Rescan" Style="{StaticResource GlassButton}" Margin="0,0,0,8" Click="Rescan_Click"/>
+                    <Separator Margin="0,8"/>
+                    <Button Content="Export PNG" Style="{StaticResource GlassButton}" Margin="0,0,0,8" Click="Export_Click"/>
+                    <Button Content="Print" Style="{StaticResource GlassButton}" Margin="0,0,0,8" Click="Print_Click"/>
+                    <Separator Margin="0,8"/>
+                    <TextBlock Text="INPAINT" FontWeight="SemiBold" Foreground="{StaticResource TextSecondary}" Margin="0,8,0,8"/>
+                    <ComboBox Name="InpaintMethodBox" SelectedIndex="0" Margin="0,0,0,8">
+                        <ComboBoxItem Content="Telea"/>
+                        <ComboBoxItem Content="Navier-Stokes"/>
+                    </ComboBox>
+                    <CheckBox Name="FitTextCheck" Content="Fit text to area" IsChecked="True" Foreground="{StaticResource TextPrimary}" Margin="0,4"/>
+                    <CheckBox Name="PreserveSizeCheck" Content="Preserve font size" Foreground="{StaticResource TextPrimary}" Margin="0,4"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Center Canvas -->
+            <Grid Grid.Column="1" Background="#FF0B1220">
+                <ScrollViewer Name="CanvasScroller"
+                              HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Auto"
+                              Background="Transparent">
+                    <Grid Name="CanvasHost" Background="Transparent">
+                        <!-- Checkerboard for transparency -->
+                        <Rectangle>
+                            <Rectangle.Fill>
+                                <DrawingBrush TileMode="Tile" Viewport="0,0,16,16" ViewportUnits="Absolute">
+                                    <DrawingBrush.Drawing>
+                                        <DrawingGroup>
+                                            <GeometryDrawing Brush="#FF1A2332">
+                                                <GeometryDrawing.Geometry>
+                                                    <RectangleGeometry Rect="0,0,16,16"/>
+                                                </GeometryDrawing.Geometry>
+                                            </GeometryDrawing>
+                                            <GeometryDrawing Brush="#FF111827">
+                                                <GeometryDrawing.Geometry>
+                                                    <GeometryGroup>
+                                                        <RectangleGeometry Rect="0,0,8,8"/>
+                                                        <RectangleGeometry Rect="8,8,8,8"/>
+                                                    </GeometryGroup>
+                                                </GeometryDrawing.Geometry>
+                                            </GeometryDrawing>
+                                        </DrawingGroup>
+                                    </DrawingBrush.Drawing>
+                                </DrawingBrush>
+                            </Rectangle.Fill>
+                        </Rectangle>
+
+                        <Viewbox Name="ImageViewbox" Stretch="Uniform">
+                            <Grid Name="ImageCanvas" Width="100" Height="100">
+                                <Image Name="MainImage" Stretch="None" RenderOptions.BitmapScalingMode="NearestNeighbor"/>
+                                <Canvas Name="OverlayCanvas" IsHitTestVisible="True"/>
+                            </Grid>
+                        </Viewbox>
+                    </Grid>
+                </ScrollViewer>
+
+                <!-- Progress overlay -->
+                <Border Name="ProgressOverlay" Background="#CC0F172A" Visibility="Collapsed">
+                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                        <TextBlock Name="ProgressLabel" Text="Scanning image…" Foreground="White" FontSize="16" HorizontalAlignment="Center" Margin="0,0,0,12"/>
+                        <ProgressBar Name="ScanProgress" Width="280" Height="8" Minimum="0" Maximum="100" Value="0"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- Right Layers -->
+            <Border Grid.Column="2" Background="{StaticResource BgPanel}" BorderBrush="{StaticResource BorderSubtle}" BorderThickness="1,0,0,0">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="LAYERS" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextSecondary}" Margin="12,12,12,8"/>
+                    <ListBox Name="LayersList" Background="Transparent" BorderThickness="0"
+                             Margin="4" SelectionChanged="LayersList_SelectionChanged">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal" Margin="4">
+                                    <CheckBox IsChecked="{Binding IsVisible}" Margin="0,0,8,0"/>
+                                    <TextBlock Text="{Binding LayerName}" Foreground="{StaticResource TextPrimary}"
+                                               TextTrimming="CharacterEllipsis" MaxWidth="160"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+        </Grid>
+    </DockPanel>
+</Window>
