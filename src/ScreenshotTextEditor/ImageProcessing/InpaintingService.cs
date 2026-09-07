@@ -7,10 +7,6 @@ using ScreenshotTextEditor.Models;
 
 namespace ScreenshotTextEditor.ImageProcessing;
 
-/// <summary>
-/// Local background reconstruction using OpenCV inpainting.
-/// Telea / NS algorithms – fully offline.
-/// </summary>
 public class InpaintingService
 {
     public BitmapSource RemoveText(BitmapSource source, IEnumerable<TextRegion> regions, InpaintMethod method = InpaintMethod.Telea)
@@ -21,7 +17,6 @@ public class InpaintingService
         foreach (var region in regions.Where(r => r.HasReplacement || r.IsEdited))
         {
             var box = region.BoundingBox;
-            // Slightly expand the mask to cover anti-aliased edges
             int pad = 2;
             int x = Math.Max(0, (int)box.X - pad);
             int y = Math.Max(0, (int)box.Y - pad);
@@ -29,25 +24,21 @@ public class InpaintingService
             int h = Math.Min(mat.Rows - y, (int)box.Height + pad * 2);
 
             if (w > 0 && h > 0)
-            {
                 Cv2.Rectangle(mask, new OpenCvSharp.Rect(x, y, w, h), Scalar.All(255), -1);
-            }
         }
 
         using var result = new Mat();
         double radius = 5.0;
         var flags = method == InpaintMethod.NavierStokes
-            ? InpaintFlags.NS
-            : InpaintFlags.Telea;
+            ? OpenCvSharp.InpaintMethod.NS
+            : OpenCvSharp.InpaintMethod.Telea;
 
         Cv2.Inpaint(mat, mask, result, radius, flags);
         return MatToBitmapSource(result);
     }
 
     public BitmapSource RemoveSingleRegion(BitmapSource source, TextRegion region, InpaintMethod method = InpaintMethod.Telea)
-    {
-        return RemoveText(source, new[] { region }, method);
-    }
+        => RemoveText(source, new[] { region }, method);
 
     private static Mat BitmapSourceToMat(BitmapSource source)
     {
