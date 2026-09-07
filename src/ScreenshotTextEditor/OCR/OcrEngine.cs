@@ -22,17 +22,12 @@ public class OcrEngine : IDisposable
 
     public OcrEngine(string? tessDataPath = null)
     {
-        // Look for tessdata next to the executable or in Resources
         var baseDir = AppDomain.CurrentDomain.BaseDirectory;
         _tessDataPath = tessDataPath
-            ?? Path.Combine(baseDir, "Resources", "tessdata")
-            ?? Path.Combine(baseDir, "tessdata");
+            ?? Path.Combine(baseDir, "Resources", "tessdata");
 
         if (!Directory.Exists(_tessDataPath))
-        {
-            // Fallback: try to create a minimal path; user must place eng.traineddata
             Directory.CreateDirectory(_tessDataPath);
-        }
 
         try
         {
@@ -43,16 +38,13 @@ public class OcrEngine : IDisposable
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"OCR init warning: {ex.Message}");
-            // Engine remains null – callers must handle gracefully
         }
     }
 
     public bool IsAvailable => _engine != null;
 
     public async Task<List<TextRegion>> AnalyzeAsync(BitmapSource image, IProgress<int>? progress = null)
-    {
-        return await Task.Run(() => Analyze(image, progress));
-    }
+        => await Task.Run(() => Analyze(image, progress));
 
     public List<TextRegion> Analyze(BitmapSource image, IProgress<int>? progress = null)
     {
@@ -62,7 +54,9 @@ public class OcrEngine : IDisposable
         try
         {
             using var bitmap = BitmapSourceToBitmap(image);
-            using var pix = PixConverter.ToPix(bitmap);
+            using var pngStream = new MemoryStream();
+            bitmap.Save(pngStream, System.Drawing.Imaging.ImageFormat.Png);
+            using var pix = Pix.LoadFromMemory(pngStream.ToArray());
             using var page = _engine.Process(pix);
 
             progress?.Report(30);
@@ -70,35 +64,28 @@ public class OcrEngine : IDisposable
             using var iter = page.GetIterator();
             iter.Begin();
 
-            int count = 0;
             do
             {
                 if (iter.TryGetBoundingBox(PageIteratorLevel.Word, out var bounds))
                 {
                     var text = iter.GetText(PageIteratorLevel.Word)?.Trim();
-                    if (string.IsNullOrWhiteSpace(text) || text.Length < 1) continue;
+                    if (string.IsNullOrWhiteSpace(text)) continue;
 
                     float conf = iter.GetConfidence(PageIteratorLevel.Word) / 100f;
-
                     var region = new TextRegion
                     {
                         OriginalText = text,
                         BoundingBox = new Rect(bounds.X1, bounds.Y1, bounds.Width, bounds.Height),
                         Confidence = conf,
-                        LayerName = text.Length > 24 ? text[..24] + "…" : text
+                        LayerName = text.Length > 24 ? text[..24] + "…" : text,
+                        DetectedColor = SampleDominantColor(bitmap, bounds)
                     };
 
-                    // Sample dominant color from the region
-                    region.DetectedColor = SampleDominantColor(bitmap, bounds);
-
                     results.Add(region);
-                    count++;
                 }
             } while (iter.Next(PageIteratorLevel.Word));
 
             progress?.Report(90);
-
-            // Merge nearby words into lines for better UX (simple heuristic)
             results = MergeNearbyWords(results);
             progress?.Report(100);
         }
@@ -112,10 +99,8 @@ public class OcrEngine : IDisposable
 
     public List<TextRegion> AnalyzeRegion(BitmapSource image, Int32Rect area)
     {
-        // Crop and run OCR only on the selected area
         var cropped = new CroppedBitmap(image, area);
         var regions = Analyze(cropped);
-        // Offset bounding boxes back to full image coordinates
         foreach (var r in regions)
         {
             r.BoundingBox = new Rect(
@@ -131,7 +116,6 @@ public class OcrEngine : IDisposable
     {
         if (words.Count < 2) return words;
 
-        // Simple left-to-right, top-to-bottom grouping into lines
         var sorted = words.OrderBy(w => w.BoundingBox.Y).ThenBy(w => w.BoundingBox.X).ToList();
         var lines = new List<TextRegion>();
         var current = sorted[0];
@@ -142,7 +126,6 @@ public class OcrEngine : IDisposable
             double verticalGap = Math.Abs(next.BoundingBox.Y - current.BoundingBox.Y);
             double horizontalGap = next.BoundingBox.X - (current.BoundingBox.X + current.BoundingBox.Width);
 
-            // Same line if vertically close and horizontally reasonable
             if (verticalGap < current.BoundingBox.Height * 0.6 && horizontalGap < current.BoundingBox.Height * 2.5)
             {
                 current.OriginalText += " " + next.OriginalText;
@@ -158,6 +141,7 @@ public class OcrEngine : IDisposable
                 current = next;
             }
         }
+
         current.LayerName = current.OriginalText.Length > 24
             ? current.OriginalText[..24] + "…"
             : current.OriginalText;
@@ -177,13 +161,11 @@ public class OcrEngine : IDisposable
             long r = 0, g = 0, b = 0;
             int count = 0;
 
-            // Sample every few pixels for speed
             for (int y = y1; y <= y2; y += 2)
             {
                 for (int x = x1; x <= x2; x += 2)
                 {
                     var px = bmp.GetPixel(x, y);
-                    // Prefer darker pixels (likely text on light bg) or high contrast
                     if (px.GetBrightness() < 0.55f)
                     {
                         r += px.R; g += px.G; b += px.B;
